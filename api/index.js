@@ -10,12 +10,12 @@ app.use(cors());
 const WEB_URL = 'https://komiku.org';
 const API_URL = 'https://api.komiku.org';
 
-// [PERUBAHAN] Menyimpan cookie sebagai konstanta agar mudah diganti
+// [PERBAIKAN] Menyimpan cookie sebagai konstanta agar mudah diganti jika sudah tidak valid.
 const KOMIKU_COOKIE = '__ddg1_=Zr0wlaxT0pDXTxpHjAfS; _ga=GA1.1.1645755130.1754118007; _ga_ZEY1BX76ZS=GS2.1.s1754118006$o1$g1$t1754120412$j18$l0$h0; __ddg8_=laUdHXcXNwS7JSlg; __ddg10_=1754124007; __ddg9_=103.47.132.62';
 
 /**
- * [PERUBAHAN] Fungsi utama untuk mengambil dan mem-parsing HTML dari sebuah URL.
- * Sekarang menerima headers kustom untuk menyertakan cookie.
+ * [PERBAIKAN] Fungsi ini diubah untuk menerima header kustom,
+ * sehingga kita bisa menyertakan cookie saat melakukan request.
  * @param {string} url - URL halaman yang akan di-scrape.
  * @param {object} [customHeaders={}] - Opsional, header tambahan untuk request.
  * @returns {Promise<cheerio.CheerioAPI|null>}
@@ -26,7 +26,7 @@ const dapatkanHtml = async (url, customHeaders = {}) => {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Referer': `${WEB_URL}/`,
-                ...customHeaders // Gabungkan header default dengan header kustom
+                ...customHeaders // Menggabungkan header default dengan header kustom (cookie)
             },
             timeout: 30000
         };
@@ -63,17 +63,14 @@ const parseComicCard = ($, el, apiUrl) => {
 
 // --- Endpoint API ---
 
-// Endpoint Proxy Gambar (tidak ada perubahan dari file asli)
+// Endpoint Proxy Gambar (tidak ada perubahan)
 app.get('/api/image', async (req, res) => {
     const { url } = req.query;
     if (!url) return res.status(400).send('URL gambar tidak ditemukan');
     try {
         const response = await axios.get(url, {
             responseType: 'stream',
-            headers: {
-                'Referer': WEB_URL,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
+            headers: { 'Referer': WEB_URL }
         });
         res.setHeader('Content-Type', response.headers['content-type']);
         response.data.pipe(res);
@@ -82,7 +79,7 @@ app.get('/api/image', async (req, res) => {
     }
 });
 
-// [PERBAIKAN UTAMA] Endpoint Daftar Komik dengan Paginasi dan Cookie
+// [PERBAIKAN UTAMA] Endpoint Daftar Komik yang sudah diperbaiki
 app.get('/api/daftar-komik', async (req, res) => {
     const page = req.query.page || 1;
     const url = `${WEB_URL}/daftar-komik/page/${page}/`;
@@ -98,6 +95,7 @@ app.get('/api/daftar-komik', async (req, res) => {
     }
 
     const comics = [];
+    // Menggunakan selector yang tepat untuk halaman daftar-komik
     $('div.bge').each((i, el) => {
         const titleElement = $(el).find('.kan a h3');
         const judul = titleElement.text().trim();
@@ -118,11 +116,11 @@ app.get('/api/daftar-komik', async (req, res) => {
     res.json(comics);
 });
 
-// Pencarian & Pustaka (tidak ada perubahan dari file asli)
+
+// Pencarian & Pustaka (tidak ada perubahan)
 app.get('/api/search/:query', async (req, res) => {
     const { query } = req.params;
     const url = `${API_URL}/?post_type=manga&s=${encodeURIComponent(query)}`;
-    // Jika endpoint ini juga butuh cookie, tambahkan headers di sini
     const $ = await dapatkanHtml(url, { 'Cookie': KOMIKU_COOKIE });
     if (!$) return res.status(500).json({ error: `Gagal mencari "${query}".` });
     const comics = [];
@@ -138,7 +136,6 @@ app.get('/api/pustaka', async (req, res) => {
     const params = new URLSearchParams(req.query);
     params.append('post_type', 'manga');
     const url = `${API_URL}/?${params.toString()}`;
-    // Jika endpoint ini juga butuh cookie, tambahkan headers di sini
     const $ = await dapatkanHtml(url, { 'Cookie': KOMIKU_COOKIE });
     if (!$) return res.status(500).json({ error: 'Gagal mengambil data pustaka.' });
     const comics = [];
@@ -150,7 +147,7 @@ app.get('/api/pustaka', async (req, res) => {
     res.json(comics);
 });
 
-// Opsi Filter (tidak ada perubahan dari file asli)
+// Opsi Filter (tidak ada perubahan)
 app.get('/api/filters', async (req, res) => {
     const $ = await dapatkanHtml(WEB_URL, { 'Cookie': KOMIKU_COOKIE });
     if (!$) return res.status(500).json({ error: 'Gagal mengambil data filter.' });
@@ -172,7 +169,7 @@ app.get('/api/filters', async (req, res) => {
     res.json({ genres, statuses, types });
 });
 
-// Endpoint Beranda (tidak ada perubahan dari file asli)
+// Endpoint Beranda (tidak ada perubahan)
 app.get('/api/terbaru', async (req, res) => {
     const $ = await dapatkanHtml(WEB_URL, { 'Cookie': KOMIKU_COOKIE });
     if (!$) return res.status(500).json({ error: 'Gagal mengambil data terbaru.' });
@@ -202,7 +199,7 @@ setupPopulerEndpoint('/api/populer/manga', '#Komik_Hot_Manga');
 setupPopulerEndpoint('/api/populer/manhwa', '#Komik_Hot_Manhwa');
 setupPopulerEndpoint('/api/populer/manhua', '#Komik_Hot_Manhua');
 
-// Detail & Chapter (tidak ada perubahan dari file asli)
+// Detail & Chapter (tidak ada perubahan)
 app.get('/api/detail', async (req, res) => {
     const { url } = req.query;
     if (!url) return res.status(400).json({ error: 'URL tidak valid.' });
