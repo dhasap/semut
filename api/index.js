@@ -2,26 +2,26 @@ const express = require('express');
 const cheerio = require('cheerio');
 const cors = require('cors');
 const chromium = require('@sparticuz/chromium');
-const puppeteer = require('puppeteer-core');
+// [PERUBAHAN] Gunakan puppeteer-extra
+const puppeteer = require('puppeteer-extra');
+// [PERUBAHAN] Tambahkan plugin stealth
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const axios = require('axios');
+
+// [PERUBAHAN] Aktifkan plugin stealth
+puppeteer.use(StealthPlugin());
 
 const app = express();
 app.use(cors());
 
 const BASE_URL = "https://soulscans.my.id";
 
-// --- Fungsi Pengambil HTML dengan Puppeteer (Anti-Blokir) ---
+// --- Fungsi Pengambil HTML dengan Puppeteer STEALTH MODE ---
 const dapatkanHtml = async (url) => {
     let browser = null;
     try {
         browser = await puppeteer.launch({
-            args: [
-                ...chromium.args,
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--single-process'
-            ],
+            args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox'],
             defaultViewport: chromium.defaultViewport,
             executablePath: await chromium.executablePath(),
             headless: chromium.headless,
@@ -30,18 +30,15 @@ const dapatkanHtml = async (url) => {
 
         const page = await browser.newPage();
         
-        // Menyamarkan diri sebagai browser Chrome sungguhan
-        await page.setViewport({ width: 1920, height: 1080 });
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        
         // Pergi ke halaman dan tunggu sampai semua konten dimuat
-        await page.goto(url, { waitUntil: 'networkidle0', timeout: 40000 });
+        // Plugin stealth akan menangani penyamaran secara otomatis
+        await page.goto(url, { waitUntil: 'networkidle0', timeout: 45000 });
         
         const content = await page.content();
         return cheerio.load(content);
 
     } catch (error) {
-        console.error(`Error Puppeteer saat mengakses ${url}:`, error.message);
+        console.error(`Error Puppeteer (Stealth) saat mengakses ${url}:`, error.message);
         return null;
     } finally {
         if (browser) {
@@ -50,7 +47,7 @@ const dapatkanHtml = async (url) => {
     }
 };
 
-// --- Fungsi Helper ---
+// --- Fungsi Helper (Tidak ada perubahan) ---
 const parseComicCard = ($, el, api) => {
     const judul = $(el).find('a').attr('title');
     const url = $(el).find('a').attr('href');
@@ -69,7 +66,7 @@ const parseComicCard = ($, el, api) => {
 
 const getFullApiUrl = (req) => `${req.protocol}://${req.get('host')}/api`;
 
-// --- Endpoint API ---
+// --- Endpoint API (Tidak ada perubahan logika, hanya engine-nya yang lebih kuat) ---
 
 // Image Proxy
 app.get('/api/image', async (req, res) => {
