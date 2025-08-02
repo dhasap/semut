@@ -1,34 +1,20 @@
-// File: index.js - Versi UTUH dengan PENYAMARAN BARU
-
 const express = require('express');
 const cheerio = require('cheerio');
 const cors = require('cors');
-// [PENAMBAHAN] Kita butuh dependensi untuk Puppeteer
 const chromium = require('@sparticuz/chromium');
 const puppeteer = require('puppeteer-core');
-// [PENAMBAHAN] Kita butuh axios hanya untuk proxy gambar
 const axios = require('axios');
-
 
 const app = express();
 app.use(cors());
 
 const BASE_URL = "https://soulscans.my.id";
-// HEADERS ini mungkin tidak akan kita gunakan lagi di Puppeteer, tapi kita biarkan UTUH
-const HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    'Referer': `${BASE_URL}/`
-};
 
-
-// =======================================================================
-// ||             >>> FUNGSI INI DI-UPGRADE DENGAN PENYAMARAN BARU <<<    ||
-// =======================================================================
+// --- Fungsi Pengambil HTML dengan Puppeteer (Anti-Blokir) ---
 const dapatkanHtml = async (url) => {
     let browser = null;
     try {
         browser = await puppeteer.launch({
-            // Menambahkan argumen yang direkomendasikan untuk stabilitas
             args: [
                 ...chromium.args,
                 '--no-sandbox',
@@ -44,149 +30,85 @@ const dapatkanHtml = async (url) => {
 
         const page = await browser.newPage();
         
-        // --- PENYAMARAN BARU ---
-        // 1. Atur ukuran layar agar terlihat seperti desktop sungguhan
+        // Menyamarkan diri sebagai browser Chrome sungguhan
         await page.setViewport({ width: 1920, height: 1080 });
-        // 2. Gunakan User-Agent dari browser Chrome versi baru yang terlihat asli
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        // -----------------------
         
-        await page.goto(url, { waitUntil: 'networkidle0', timeout: 35000 });
+        // Pergi ke halaman dan tunggu sampai semua konten dimuat
+        await page.goto(url, { waitUntil: 'networkidle0', timeout: 40000 });
         
-        // CCTV tetap terpasang
-        const htmlContent = await page.content();
-        console.log(`===== START: HTML content for ${url} =====`);
-        console.log(htmlContent);
-        console.log(`===== END: HTML content for ${url} =====`);
-
-        return cheerio.load(htmlContent);
+        const content = await page.content();
+        return cheerio.load(content);
 
     } catch (error) {
-        console.error(`Error saat mengakses ${url} dengan Puppeteer:`, error.message);
+        console.error(`Error Puppeteer saat mengakses ${url}:`, error.message);
         return null;
     } finally {
-        if (browser !== null) {
+        if (browser) {
             await browser.close();
         }
     }
 };
 
-// =====================================================================
-// ||         SEMUA KODE DI BAWAH INI ADALAH 100% KODEMU ASLI           ||
-// =====================================================================
-
+// --- Fungsi Helper ---
 const parseComicCard = ($, el, api) => {
     const judul = $(el).find('a').attr('title');
     const url = $(el).find('a').attr('href');
     let gambar_sampul = $(el).find('img').attr('src') || $(el).find('img').attr('data-src');
     
     if (gambar_sampul) {
-        if (gambar_sampul.startsWith('//')) {
-            gambar_sampul = 'https:' + gambar_sampul;
-        }
+        if (gambar_sampul.startsWith('//')) gambar_sampul = 'https:' + gambar_sampul;
         gambar_sampul = `${api}/image?url=${encodeURIComponent(gambar_sampul.trim())}`;
     } else {
         gambar_sampul = "Tidak ada gambar";
     }
 
-    if (judul && url) {
-        return {
-            judul,
-            url,
-            gambar_sampul
-        };
-    }
+    if (judul && url) return { judul, url, gambar_sampul };
     return null;
 };
 
-const getFullApiUrl = (req) => {
-    return `${req.protocol}://${req.get('host')}/api`;
-}
+const getFullApiUrl = (req) => `${req.protocol}://${req.get('host')}/api`;
 
 // --- Endpoint API ---
 
+// Image Proxy
 app.get('/api/image', async (req, res) => {
-    const imageUrl = req.query.url;
-    if (!imageUrl) return res.status(400).send('URL gambar tidak ditemukan');
-
+    const { url } = req.query;
+    if (!url) return res.status(400).send('URL gambar tidak ditemukan');
     try {
-        const response = await axios({
-            method: 'get',
-            url: imageUrl,
-            responseType: 'stream',
-            headers: { ...HEADERS } // Tetap gunakan HEADERS aslimu untuk proxy gambar
+        const response = await axios.get(url, { 
+            responseType: 'stream', 
+            headers: { 'Referer': BASE_URL } 
         });
         res.setHeader('Content-Type', response.headers['content-type']);
         response.data.pipe(res);
     } catch (error) {
-        console.error(`Gagal mem-proxy gambar ${imageUrl}:`, error.message);
         res.status(500).send('Gagal mengambil gambar');
     }
 });
 
-app.get('/api/hot', async (req, res) => {
-    console.log("Menerima request untuk /api/hot");
-    const $ = await dapatkanHtml(BASE_URL);
-    if (!$) return res.status(500).json({ error: 'Gagal mengambil data hot.' });
-
-    const daftarHot = [];
-    const apiUrl = getFullApiUrl(req);
-    $('div.bixbox.hothome .listupd .bs .bsx').each((i, el) => {
-        const comic = parseComicCard($, el, apiUrl);
-        if (comic) daftarHot.push(comic);
-    });
-    res.json(daftarHot);
-});
-
-
+// Pencarian
 app.get('/api/search/:query', async (req, res) => {
-    const searchQuery = req.params.query;
-    const searchUrl = `${BASE_URL}/?s=${encodeURIComponent(searchQuery)}`;
+    const { query } = req.params;
+    const searchUrl = `${BASE_URL}/?s=${encodeURIComponent(query)}`;
     const $ = await dapatkanHtml(searchUrl);
-    if (!$) return res.status(500).json({ error: `Gagal mencari "${searchQuery}".` });
+    if (!$) return res.status(500).json({ error: `Gagal mencari "${query}".` });
     
-    const hasilPencarian = [];
+    const hasil = [];
     const apiUrl = getFullApiUrl(req);
     $('div.listupd .bs .bsx').each((i, el) => {
         const comic = parseComicCard($, el, apiUrl);
-        if (comic) hasilPencarian.push(comic);
+        if (comic) hasil.push(comic);
     });
-    res.json(hasilPencarian);
+    res.json(hasil);
 });
 
-app.get('/api/series', async (req, res) => {
-    const listUrl = `${BASE_URL}/series/`;
-    const $ = await dapatkanHtml(listUrl);
-    if (!$) return res.status(500).json({ error: 'Gagal mengambil data seri.' });
-    
-    const daftarSeri = [];
-    const apiUrl = getFullApiUrl(req);
-    $('div.utao .uta .bsx').each((i, el) => {
-        const comic = parseComicCard($, el, apiUrl);
-        if (comic) daftarSeri.push(comic);
-    });
-    res.json(daftarSeri);
-});
-
-app.get('/api/list', async (req, res) => {
-    const listUrl = `${BASE_URL}/manga/list-mode/`;
-    const $ = await dapatkanHtml(listUrl);
-    if (!$) return res.status(500).json({ error: 'Gagal mengambil data list.' });
-    
-    const daftarSeri = [];
-    $('div.soralist .blix ul li a').each((i, el) => {
-        const judul = $(el).text().trim();
-        const url = $(el).attr('href');
-        if (judul && url) daftarSeri.push({ judul, url });
-    });
-    res.json(daftarSeri);
-});
-
+// Detail Komik
 app.get('/api/detail', async (req, res) => {
-    const seriUrl = req.query.url;
-    if (!seriUrl || !seriUrl.startsWith(BASE_URL)) return res.status(400).json({ error: 'URL seri tidak valid.' });
+    const { url } = req.query;
+    if (!url || !url.startsWith(BASE_URL)) return res.status(400).json({ error: 'URL seri tidak valid.' });
     
-    const $ = await dapatkanHtml(seriUrl);
+    const $ = await dapatkanHtml(url);
     if (!$) return res.status(500).json({ error: 'Gagal mengambil detail seri.' });
     
     const deskripsi = $('div[itemprop="description"] p').text().trim() || "Deskripsi tidak ditemukan.";
@@ -199,11 +121,12 @@ app.get('/api/detail', async (req, res) => {
     res.json({ deskripsi, chapters: daftarChapter });
 });
 
+// Gambar Chapter
 app.get('/api/chapter', async (req, res) => {
-    const chapterUrl = req.query.url;
-    if (!chapterUrl || !chapterUrl.startsWith(BASE_URL)) return res.status(400).json({ error: 'URL chapter tidak valid.' });
+    const { url } = req.query;
+    if (!url || !url.startsWith(BASE_URL)) return res.status(400).json({ error: 'URL chapter tidak valid.' });
     
-    const $ = await dapatkanHtml(chapterUrl);
+    const $ = await dapatkanHtml(url);
     if (!$) return res.status(500).json({ error: 'Gagal mengambil gambar chapter.' });
     
     const daftarGambar = [];
@@ -219,64 +142,49 @@ app.get('/api/chapter', async (req, res) => {
     res.json(daftarGambar);
 });
 
-app.get('/api/genres', async (req, res) => {
-    const genrePageUrl = `${BASE_URL}/manga/`;
-    const $ = await dapatkanHtml(genrePageUrl);
-    if (!$) return res.status(500).json({ error: 'Gagal mengambil daftar genre.' });
-    
-    const daftarGenre = [];
-    $('ul.dropdown-menu.c4.genrez li label').each((i, el) => {
-        const label = $(el).text().trim();
-        if (label) {
-            const slug = label.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-            daftarGenre.push({ nama: label, slug });
-        }
+// Endpoint yang mengembalikan list komik
+const setupListEndpoint = (path, selector) => {
+    app.get(path, async (req, res) => {
+        const url = `${BASE_URL}${req.originalUrl.replace('/api', '')}`;
+        const $ = await dapatkanHtml(url);
+        if (!$) return res.status(500).json({ error: `Gagal mengambil data dari ${path}` });
+        
+        const results = [];
+        const apiUrl = getFullApiUrl(req);
+        $(selector).each((i, el) => {
+            const comic = parseComicCard($, el, apiUrl);
+            if (comic) results.push(comic);
+        });
+        res.json(results);
     });
-    res.json(daftarGenre);
-});
+};
 
-app.get('/api/genres/:slug', async (req, res) => {
-    const genreSlug = req.params.slug;
-    const genreUrl = `${BASE_URL}/genres/${genreSlug}/`;
-    const $ = await dapatkanHtml(genreUrl);
-    if (!$) return res.status(500).json({ error: `Gagal mengambil data genre ${genreSlug}.` });
-    
-    const daftarSeri = [];
-    const apiUrl = getFullApiUrl(req);
-    $('div.listupd .bs .bsx').each((i, el) => {
-        const comic = parseComicCard($, el, apiUrl);
-        if (comic) daftarSeri.push(comic);
-    });
-    res.json(daftarSeri);
+setupListEndpoint('/api/series', 'div.utao .uta .bsx');
+setupListEndpoint('/api/genres/:slug', 'div.listupd .bs .bsx');
+setupListEndpoint('/api/status/:slug', 'div.listupd .bs .bsx');
+setupListEndpoint('/api/hot', 'div.bixbox.hothome .listupd .bs .bsx');
+
+// Endpoint yang mengembalikan list teks
+app.get('/api/genres', async (req, res) => {
+    const $ = await dapatkanHtml(`${BASE_URL}/manga/`);
+    if (!$) return res.status(500).json({ error: 'Gagal mengambil daftar genre.' });
+    const genres = $('ul.dropdown-menu.c4.genrez li label').map((i, el) => {
+        const label = $(el).text().trim();
+        return label ? { nama: label, slug: label.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') } : null;
+    }).get();
+    res.json(genres);
 });
 
 app.get('/api/status', async (req, res) => {
-    const mangaPageUrl = `${BASE_URL}/manga/`;
-    const $ = await dapatkanHtml(mangaPageUrl);
+    const $ = await dapatkanHtml(`${BASE_URL}/manga/`);
     if (!$) return res.status(500).json({ error: 'Gagal mengambil daftar status.' });
-    
-    const daftarStatus = [];
-    $('div.filter.dropdown:has(button:contains("Status")) ul.dropdown-menu li').each((i, el) => {
+    const statuses = $('div.filter.dropdown:has(button:contains("Status")) ul.dropdown-menu li').map((i, el) => {
         const label = $(el).find('label').text().trim();
         const value = $(el).find('input[type="radio"]').val();
-        if (label && value) daftarStatus.push({ nama: label, slug: value });
-    });
-    res.json(daftarStatus);
+        return (label && value) ? { nama: label, slug: value } : null;
+    }).get();
+    res.json(statuses);
 });
 
-app.get('/api/status/:slug', async (req, res) => {
-    const statusSlug = req.params.slug;
-    const statusUrl = `${BASE_URL}/manga/?status=${statusSlug}`;
-    const $ = await dapatkanHtml(statusUrl);
-    if (!$) return res.status(500).json({ error: `Gagal mengambil data status ${statusSlug}.` });
-    
-    const daftarSeri = [];
-    const apiUrl = getFullApiUrl(req);
-    $('div.listupd .bs .bsx').each((i, el) => {
-        const comic = parseComicCard($, el, apiUrl);
-        if (comic) daftarSeri.push(comic);
-    });
-    res.json(daftarSeri);
-});
-
+// Export aplikasi Express
 module.exports = app;
