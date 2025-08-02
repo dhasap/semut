@@ -6,6 +6,7 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const axios = require('axios');
 
+// Aktifkan plugin stealth
 puppeteer.use(StealthPlugin());
 
 const app = express();
@@ -13,20 +14,19 @@ app.use(cors());
 
 const BASE_URL = "https://soulscans.my.id";
 
-// [TAKTIK BARU] Daftar identitas browser acak
-const USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
-];
-
-// --- Fungsi Pengambil HTML dengan Puppeteer STEALTH MODE v2 ---
+// --- Fungsi Pengambil HTML dengan Puppeteer MODE PENYAMARAN MAKSIMAL ---
 const dapatkanHtml = async (url) => {
     let browser = null;
+    console.log(`[STEALTH MODE] Mencoba mengambil HTML dari: ${url}`);
     try {
         browser = await puppeteer.launch({
-            args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox'],
+            args: [
+                ...chromium.args,
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                // [JURUS BARU] Flag ini penting untuk menyembunyikan bahwa ini adalah browser otomatis
+                '--disable-blink-features=AutomationControlled',
+            ],
             defaultViewport: chromium.defaultViewport,
             executablePath: await chromium.executablePath(),
             headless: chromium.headless,
@@ -35,25 +35,39 @@ const dapatkanHtml = async (url) => {
 
         const page = await browser.newPage();
         
-        // [TAKTIK BARU] Menggunakan User-Agent acak setiap request
-        const randomUserAgent = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
-        await page.setUserAgent(randomUserAgent);
-        await page.setViewport({ width: 1920, height: 1080 });
+        // [JURUS BARU] Menghapus properti "webdriver" yang menandakan browser otomatis
+        await page.evaluateOnNewDocument(() => {
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => false,
+            });
+        });
 
-        await page.goto(url, { waitUntil: 'networkidle0', timeout: 45000 });
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         
-        // [TAKTIK BARU] Menambahkan jeda acak untuk meniru perilaku manusia
-        await page.waitForTimeout(Math.random() * 2000 + 1000); // Jeda antara 1-3 detik
-
+        console.log(`Membuka halaman: ${url}`);
+        await page.goto(url, { waitUntil: 'networkidle0', timeout: 50000 }); // Timeout diperpanjang
+        
+        console.log(`Halaman berhasil dimuat, mengambil konten...`);
         const content = await page.content();
+        
+        // Cek apakah konten berisi halaman blokir Cloudflare
+        if (content.includes('Checking your browser') || content.includes('DDoS protection')) {
+            console.log('Terdeteksi halaman Cloudflare, menunggu navigasi...');
+            // Menunggu sedikit lebih lama untuk memberi waktu pada Cloudflare
+            await page.waitForTimeout(5000); 
+            console.log('Navigasi selesai, mengambil konten ulang...');
+            content = await page.content();
+        }
+
         return cheerio.load(content);
 
     } catch (error) {
-        console.error(`Error Puppeteer (Stealth v2) saat mengakses ${url}:`, error.message);
+        console.error(`Error Puppeteer (Stealth v3) saat mengakses ${url}:`, error.message);
         return null;
     } finally {
         if (browser) {
             await browser.close();
+            console.log(`Browser ditutup untuk ${url}`);
         }
     }
 };
@@ -77,7 +91,7 @@ const parseComicCard = ($, el, api) => {
 
 const getFullApiUrl = (req) => `${req.protocol}://${req.get('host')}/api`;
 
-// --- Endpoint API (Tidak ada perubahan logika, hanya engine-nya yang lebih kuat) ---
+// --- Endpoint API ---
 
 // Image Proxy
 app.get('/api/image', async (req, res) => {
