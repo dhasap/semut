@@ -2,13 +2,10 @@ const express = require('express');
 const cheerio = require('cheerio');
 const cors = require('cors');
 const chromium = require('@sparticuz/chromium');
-// [PERUBAHAN] Gunakan puppeteer-extra
 const puppeteer = require('puppeteer-extra');
-// [PERUBAHAN] Tambahkan plugin stealth
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const axios = require('axios');
 
-// [PERUBAHAN] Aktifkan plugin stealth
 puppeteer.use(StealthPlugin());
 
 const app = express();
@@ -16,7 +13,15 @@ app.use(cors());
 
 const BASE_URL = "https://soulscans.my.id";
 
-// --- Fungsi Pengambil HTML dengan Puppeteer STEALTH MODE ---
+// [TAKTIK BARU] Daftar identitas browser acak
+const USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
+];
+
+// --- Fungsi Pengambil HTML dengan Puppeteer STEALTH MODE v2 ---
 const dapatkanHtml = async (url) => {
     let browser = null;
     try {
@@ -30,15 +35,21 @@ const dapatkanHtml = async (url) => {
 
         const page = await browser.newPage();
         
-        // Pergi ke halaman dan tunggu sampai semua konten dimuat
-        // Plugin stealth akan menangani penyamaran secara otomatis
+        // [TAKTIK BARU] Menggunakan User-Agent acak setiap request
+        const randomUserAgent = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+        await page.setUserAgent(randomUserAgent);
+        await page.setViewport({ width: 1920, height: 1080 });
+
         await page.goto(url, { waitUntil: 'networkidle0', timeout: 45000 });
         
+        // [TAKTIK BARU] Menambahkan jeda acak untuk meniru perilaku manusia
+        await page.waitForTimeout(Math.random() * 2000 + 1000); // Jeda antara 1-3 detik
+
         const content = await page.content();
         return cheerio.load(content);
 
     } catch (error) {
-        console.error(`Error Puppeteer (Stealth) saat mengakses ${url}:`, error.message);
+        console.error(`Error Puppeteer (Stealth v2) saat mengakses ${url}:`, error.message);
         return null;
     } finally {
         if (browser) {
