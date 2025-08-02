@@ -1,4 +1,4 @@
-// File: index.js - Versi UTUH dengan KUNCI PUPPETEER + CCTV (Lengkap)
+// File: index.js - Versi UTUH dengan PENYAMARAN BARU
 
 const express = require('express');
 const cheerio = require('cheerio');
@@ -14,20 +14,28 @@ const app = express();
 app.use(cors());
 
 const BASE_URL = "https://soulscans.my.id";
+// HEADERS ini mungkin tidak akan kita gunakan lagi di Puppeteer, tapi kita biarkan UTUH
 const HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/5.37.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
     'Referer': `${BASE_URL}/`
 };
 
 
 // =======================================================================
-// ||             >>> FUNGSI INI DI-UPGRADE MENJADI PUPPETEER <<<         ||
+// ||             >>> FUNGSI INI DI-UPGRADE DENGAN PENYAMARAN BARU <<<    ||
 // =======================================================================
 const dapatkanHtml = async (url) => {
     let browser = null;
     try {
         browser = await puppeteer.launch({
-            args: chromium.args,
+            // Menambahkan argumen yang direkomendasikan untuk stabilitas
+            args: [
+                ...chromium.args,
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--single-process'
+            ],
             defaultViewport: chromium.defaultViewport,
             executablePath: await chromium.executablePath(),
             headless: chromium.headless,
@@ -35,17 +43,21 @@ const dapatkanHtml = async (url) => {
         });
 
         const page = await browser.newPage();
-        await page.setUserAgent(HEADERS['User-Agent']);
-        await page.setExtraHTTPHeaders({ 'Referer': HEADERS['Referer'] });
+        
+        // --- PENYAMARAN BARU ---
+        // 1. Atur ukuran layar agar terlihat seperti desktop sungguhan
+        await page.setViewport({ width: 1920, height: 1080 });
+        // 2. Gunakan User-Agent dari browser Chrome versi baru yang terlihat asli
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        // -----------------------
         
         await page.goto(url, { waitUntil: 'networkidle0', timeout: 35000 });
         
-        // ======== CCTV YANG KAMU MINTA, TERPASANG DI SINI ========
+        // CCTV tetap terpasang
         const htmlContent = await page.content();
         console.log(`===== START: HTML content for ${url} =====`);
         console.log(htmlContent);
         console.log(`===== END: HTML content for ${url} =====`);
-        // =======================================================
 
         return cheerio.load(htmlContent);
 
@@ -59,12 +71,10 @@ const dapatkanHtml = async (url) => {
     }
 };
 
-
 // =====================================================================
 // ||         SEMUA KODE DI BAWAH INI ADALAH 100% KODEMU ASLI           ||
 // =====================================================================
 
-// --- Fungsi Helper ---
 const parseComicCard = ($, el, api) => {
     const judul = $(el).find('a').attr('title');
     const url = $(el).find('a').attr('href');
@@ -104,7 +114,7 @@ app.get('/api/image', async (req, res) => {
             method: 'get',
             url: imageUrl,
             responseType: 'stream',
-            headers: { ...HEADERS }
+            headers: { ...HEADERS } // Tetap gunakan HEADERS aslimu untuk proxy gambar
         });
         res.setHeader('Content-Type', response.headers['content-type']);
         response.data.pipe(res);
@@ -127,6 +137,7 @@ app.get('/api/hot', async (req, res) => {
     });
     res.json(daftarHot);
 });
+
 
 app.get('/api/search/:query', async (req, res) => {
     const searchQuery = req.params.query;
