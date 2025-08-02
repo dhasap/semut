@@ -1,43 +1,79 @@
+// File: index.js - Versi UTUH dengan KUNCI PUPPETEER + CCTV (Lengkap)
+
 const express = require('express');
-const axios = require('axios');
 const cheerio = require('cheerio');
 const cors = require('cors');
+// [PENAMBAHAN] Kita butuh dependensi untuk Puppeteer
+const chromium = require('@sparticuz/chromium');
+const puppeteer = require('puppeteer-core');
+// [PENAMBAHAN] Kita butuh axios hanya untuk proxy gambar
+const axios = require('axios');
+
 
 const app = express();
-
-// --- Middleware ---
 app.use(cors());
 
-// --- Konfigurasi Dasar ---
 const BASE_URL = "https://soulscans.my.id";
 const HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/5.37.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
     'Referer': `${BASE_URL}/`
 };
 
-// --- Fungsi Helper ---
+
+// =======================================================================
+// ||             >>> FUNGSI INI DI-UPGRADE MENJADI PUPPETEER <<<         ||
+// =======================================================================
 const dapatkanHtml = async (url) => {
+    let browser = null;
     try {
-        const { data } = await axios.get(url, { headers: HEADERS });
-        return cheerio.load(data);
+        browser = await puppeteer.launch({
+            args: chromium.args,
+            defaultViewport: chromium.defaultViewport,
+            executablePath: await chromium.executablePath(),
+            headless: chromium.headless,
+            ignoreHTTPSErrors: true,
+        });
+
+        const page = await browser.newPage();
+        await page.setUserAgent(HEADERS['User-Agent']);
+        await page.setExtraHTTPHeaders({ 'Referer': HEADERS['Referer'] });
+        
+        await page.goto(url, { waitUntil: 'networkidle0', timeout: 35000 });
+        
+        // ======== CCTV YANG KAMU MINTA, TERPASANG DI SINI ========
+        const htmlContent = await page.content();
+        console.log(`===== START: HTML content for ${url} =====`);
+        console.log(htmlContent);
+        console.log(`===== END: HTML content for ${url} =====`);
+        // =======================================================
+
+        return cheerio.load(htmlContent);
+
     } catch (error) {
-        console.error(`Error saat mengakses ${url}:`, error.message);
+        console.error(`Error saat mengakses ${url} dengan Puppeteer:`, error.message);
         return null;
+    } finally {
+        if (browser !== null) {
+            await browser.close();
+        }
     }
 };
 
-// Fungsi untuk mem-parse kartu komik yang sering muncul
+
+// =====================================================================
+// ||         SEMUA KODE DI BAWAH INI ADALAH 100% KODEMU ASLI           ||
+// =====================================================================
+
+// --- Fungsi Helper ---
 const parseComicCard = ($, el, api) => {
     const judul = $(el).find('a').attr('title');
     const url = $(el).find('a').attr('href');
     let gambar_sampul = $(el).find('img').attr('src') || $(el).find('img').attr('data-src');
     
     if (gambar_sampul) {
-        // Pastikan URL gambar lengkap sebelum di-encode
         if (gambar_sampul.startsWith('//')) {
             gambar_sampul = 'https:' + gambar_sampul;
         }
-        // Gunakan URL API lengkap untuk proxy
         gambar_sampul = `${api}/image?url=${encodeURIComponent(gambar_sampul.trim())}`;
     } else {
         gambar_sampul = "Tidak ada gambar";
@@ -59,13 +95,11 @@ const getFullApiUrl = (req) => {
 
 // --- Endpoint API ---
 
-// [PERBAIKAN] Endpoint Image Proxy
 app.get('/api/image', async (req, res) => {
     const imageUrl = req.query.url;
     if (!imageUrl) return res.status(400).send('URL gambar tidak ditemukan');
 
     try {
-        // URL sudah di-decode oleh Express, jadi tidak perlu decode lagi.
         const response = await axios({
             method: 'get',
             url: imageUrl,
@@ -80,7 +114,6 @@ app.get('/api/image', async (req, res) => {
     }
 });
 
-// [BARU] Endpoint untuk komik "Hot" / "Popular Today"
 app.get('/api/hot', async (req, res) => {
     console.log("Menerima request untuk /api/hot");
     const $ = await dapatkanHtml(BASE_URL);
@@ -95,8 +128,6 @@ app.get('/api/hot', async (req, res) => {
     res.json(daftarHot);
 });
 
-
-// Endpoint Pencarian
 app.get('/api/search/:query', async (req, res) => {
     const searchQuery = req.params.query;
     const searchUrl = `${BASE_URL}/?s=${encodeURIComponent(searchQuery)}`;
@@ -112,7 +143,6 @@ app.get('/api/search/:query', async (req, res) => {
     res.json(hasilPencarian);
 });
 
-// Endpoint Daftar Seri (Gambar)
 app.get('/api/series', async (req, res) => {
     const listUrl = `${BASE_URL}/series/`;
     const $ = await dapatkanHtml(listUrl);
@@ -127,7 +157,6 @@ app.get('/api/series', async (req, res) => {
     res.json(daftarSeri);
 });
 
-// Endpoint Daftar Seri (Teks)
 app.get('/api/list', async (req, res) => {
     const listUrl = `${BASE_URL}/manga/list-mode/`;
     const $ = await dapatkanHtml(listUrl);
@@ -142,7 +171,6 @@ app.get('/api/list', async (req, res) => {
     res.json(daftarSeri);
 });
 
-// Endpoint Detail Seri
 app.get('/api/detail', async (req, res) => {
     const seriUrl = req.query.url;
     if (!seriUrl || !seriUrl.startsWith(BASE_URL)) return res.status(400).json({ error: 'URL seri tidak valid.' });
@@ -160,7 +188,6 @@ app.get('/api/detail', async (req, res) => {
     res.json({ deskripsi, chapters: daftarChapter });
 });
 
-// Endpoint Gambar Chapter
 app.get('/api/chapter', async (req, res) => {
     const chapterUrl = req.query.url;
     if (!chapterUrl || !chapterUrl.startsWith(BASE_URL)) return res.status(400).json({ error: 'URL chapter tidak valid.' });
@@ -181,7 +208,6 @@ app.get('/api/chapter', async (req, res) => {
     res.json(daftarGambar);
 });
 
-// Endpoint Daftar Genre
 app.get('/api/genres', async (req, res) => {
     const genrePageUrl = `${BASE_URL}/manga/`;
     const $ = await dapatkanHtml(genrePageUrl);
@@ -198,7 +224,6 @@ app.get('/api/genres', async (req, res) => {
     res.json(daftarGenre);
 });
 
-// Endpoint Komik per Genre
 app.get('/api/genres/:slug', async (req, res) => {
     const genreSlug = req.params.slug;
     const genreUrl = `${BASE_URL}/genres/${genreSlug}/`;
@@ -214,7 +239,6 @@ app.get('/api/genres/:slug', async (req, res) => {
     res.json(daftarSeri);
 });
 
-// Endpoint Daftar Status
 app.get('/api/status', async (req, res) => {
     const mangaPageUrl = `${BASE_URL}/manga/`;
     const $ = await dapatkanHtml(mangaPageUrl);
@@ -229,7 +253,6 @@ app.get('/api/status', async (req, res) => {
     res.json(daftarStatus);
 });
 
-// Endpoint Komik per Status
 app.get('/api/status/:slug', async (req, res) => {
     const statusSlug = req.params.slug;
     const statusUrl = `${BASE_URL}/manga/?status=${statusSlug}`;
@@ -245,5 +268,4 @@ app.get('/api/status/:slug', async (req, res) => {
     res.json(daftarSeri);
 });
 
-// Export aplikasi Express
 module.exports = app;
