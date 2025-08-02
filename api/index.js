@@ -2,8 +2,6 @@ const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const cors = require('cors');
-const chromium = require('@sparticuz/chromium');
-const puppeteer = require('puppeteer-core');
 
 const app = express();
 app.use(cors());
@@ -11,7 +9,6 @@ app.use(cors());
 const WEB_URL = 'https://komiku.org';
 const API_URL = 'https://api.komiku.org';
 
-// --- Konfigurasi Axios (Untuk halaman statis & cepat) ---
 const axiosInstance = axios.create({
     headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -20,38 +17,13 @@ const axiosInstance = axios.create({
     timeout: 30000
 });
 
-// --- Fungsi Helper ---
-// 1. Helper Cepat dengan Axios
-const dapatkanHtmlCepat = async (url) => {
+const dapatkanHtml = async (url) => {
     try {
         const { data } = await axiosInstance.get(url);
         return cheerio.load(data);
     } catch (error) {
-        console.error(`Error Axios saat mengakses ${url}:`, error.message);
+        console.error(`Error saat mengakses ${url}:`, error.message);
         return null;
-    }
-};
-
-// 2. Helper Sabar dengan Puppeteer (Khusus untuk halaman dinamis)
-const dapatkanHtmlSabar = async (url) => {
-    let browser = null;
-    try {
-        browser = await puppeteer.launch({
-            args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox'],
-            defaultViewport: chromium.defaultViewport,
-            executablePath: await chromium.executablePath(),
-            headless: chromium.headless,
-            ignoreHTTPSErrors: true,
-        });
-        const page = await browser.newPage();
-        await page.goto(url, { waitUntil: 'networkidle0', timeout: 45000 });
-        const content = await page.content();
-        return cheerio.load(content);
-    } catch (error) {
-        console.error(`Error Puppeteer saat mengakses ${url}:`, error.message);
-        return null;
-    } finally {
-        if (browser) await browser.close();
     }
 };
 
@@ -76,7 +48,6 @@ const parseComicCard = ($, el, apiUrl) => {
 
 // --- Endpoint API ---
 
-// Image Proxy (Tetap pakai Axios karena cepat)
 app.get('/api/image', async (req, res) => {
     const { url } = req.query;
     if (!url) return res.status(400).send('URL gambar tidak ditemukan');
@@ -89,25 +60,36 @@ app.get('/api/image', async (req, res) => {
     }
 });
 
-// [PERBAIKAN] Daftar Semua Komik A-Z (Pakai Puppeteer)
+// [PERBAIKAN TOTAL] Daftar Semua Komik A-Z (Menggunakan Sitemap)
 app.get('/api/daftar-komik', async (req, res) => {
-    const $ = await dapatkanHtmlSabar(`${WEB_URL}/daftar-komik/`);
-    if (!$) return res.status(500).json({ error: 'Gagal mengambil daftar komik.' });
-    const comics = $('ul.daftarkomic li a').map((i, el) => ({
-        judul: $(el).text().trim(),
-        url: $(el).attr('href')
-    })).get();
-    res.json(comics);
+    try {
+        // Langsung tembak ke file sitemap yang berisi semua link manga
+        const { data } = await axiosInstance.get(`${WEB_URL}/manga-sitemap.xml`);
+        const $ = cheerio.load(data, { xmlMode: true }); // Gunakan xmlMode
+        const comics = [];
+        $('url').each(function () {
+            const url = $(this).find('loc').text().trim();
+            // Filter hanya URL yang mengandung '/manga/'
+            if (url.includes('/manga/')) {
+                const judul = url.split('/').filter(Boolean).pop().replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                 comics.push({
+                    judul: judul,
+                    url: url
+                });
+            }
+        });
+        res.json(comics);
+    } catch (error) {
+        console.error('Error saat mengambil sitemap:', error.message);
+        res.status(500).json({ error: 'Gagal mengambil daftar komik.' });
+    }
 });
-
-
-// --- Endpoint lain tetap pakai Axios agar cepat ---
 
 // Pencarian & Pustaka (Langsung ke API Komiku)
 app.get('/api/search/:query', async (req, res) => {
     const { query } = req.params;
     const url = `${API_URL}/?post_type=manga&s=${encodeURIComponent(query)}`;
-    const $ = await dapatkanHtmlCepat(url);
+    const $ = await dapatkanHtml(url);
     if (!$) return res.status(500).json({ error: `Gagal mencari "${query}".` });
     const comics = [];
     const apiUrl = getFullApiUrl(req);
@@ -122,7 +104,7 @@ app.get('/api/pustaka', async (req, res) => {
     const params = new URLSearchParams(req.query);
     params.append('post_type', 'manga');
     const url = `${API_URL}/?${params.toString()}`;
-    const $ = await dapatkanHtmlCepat(url);
+    const $ = await dapatkanHtml(url);
     if (!$) return res.status(500).json({ error: 'Gagal mengambil data pustaka.' });
     const comics = [];
     const apiUrl = getFullApiUrl(req);
@@ -135,7 +117,7 @@ app.get('/api/pustaka', async (req, res) => {
 
 // Opsi Filter (Genre, Status, Tipe)
 app.get('/api/filters', async (req, res) => {
-    const $ = await dapatkanHtmlCepat(WEB_URL);
+    const $ = await dapatkanHtml(WEB_URL);
     if (!$) return res.status(500).json({ error: 'Gagal mengambil data filter.' });
     const genres = $('form.filer2 select[name="genre"] option').map((i, el) => {
         const nama = $(el).text().trim();
@@ -157,7 +139,7 @@ app.get('/api/filters', async (req, res) => {
 
 // Endpoint Beranda (Terbaru & Populer)
 app.get('/api/terbaru', async (req, res) => {
-    const $ = await dapatkanHtmlCepat(WEB_URL);
+    const $ = await dapatkanHtml(WEB_URL);
     if (!$) return res.status(500).json({ error: 'Gagal mengambil data terbaru.' });
     const comics = [];
     const apiUrl = getFullApiUrl(req);
@@ -170,7 +152,7 @@ app.get('/api/terbaru', async (req, res) => {
 
 const setupPopulerEndpoint = (path, sectionId) => {
     app.get(path, async (req, res) => {
-        const $ = await dapatkanHtmlCepat(WEB_URL);
+        const $ = await dapatkanHtml(WEB_URL);
         if (!$) return res.status(500).json({ error: `Gagal mengambil data dari ${sectionId}` });
         const comics = [];
         const apiUrl = getFullApiUrl(req);
@@ -189,7 +171,7 @@ setupPopulerEndpoint('/api/populer/manhua', '#Komik_Hot_Manhua');
 app.get('/api/detail', async (req, res) => {
     const { url } = req.query;
     if (!url) return res.status(400).json({ error: 'URL tidak valid.' });
-    const $ = await dapatkanHtmlCepat(url);
+    const $ = await dapatkanHtml(url);
     if (!$) return res.status(500).json({ error: 'Gagal mengambil detail.' });
     const judul = $('#Judul h1').text().trim();
     const gambar_sampul = $('#Informasi img').attr('src');
@@ -205,7 +187,7 @@ app.get('/api/detail', async (req, res) => {
 app.get('/api/chapter', async (req, res) => {
     const { url } = req.query;
     if (!url) return res.status(400).json({ error: 'URL tidak valid.' });
-    const $ = await dapatkanHtmlCepat(url);
+    const $ = await dapatkanHtml(url);
     if (!$) return res.status(500).json({ error: 'Gagal mengambil chapter.' });
     const apiUrl = getFullApiUrl(req);
     const images = $('#Baca_Komik img').map((i, el) => {
