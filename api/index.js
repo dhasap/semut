@@ -2,50 +2,31 @@ const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const cors = require('cors');
+// Import Puppeteer
+const puppeteer = require('puppeteer-core');
+const chrome = require('chrome-aws-lambda');
 
 const app = express();
 app.use(cors());
 
-// URL target
+// URL target utama
 const WEB_URL = 'https://komiku.org';
-const API_URL = 'https://api.komiku.org';
-
-// [PENTING] Cookie ini mungkin perlu diperbarui secara berkala jika API berhenti bekerja.
-const KOMIKU_COOKIE = '__ddg1_=Zr0wlaxT0pDXTxpHjAfS; _ga=GA1.1.1645755130.1754118007; _ga_ZEY1BX76ZS=GS2.1.s1754118006$o1$g1$t1754120412$j18$l0$h0; __ddg8_=laUdHXcXNwS7JSlg; __ddg10_=1754124007; __ddg9_=103.47.132.62';
-
-const dapatkanHtml = async (url, customHeaders = {}) => {
-    try {
-        const options = {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': `${WEB_URL}/`,
-                ...customHeaders
-            },
-            timeout: 30000
-        };
-        const { data } = await axios.get(url, options);
-        return cheerio.load(data);
-    } catch (error) {
-        console.error(`Error saat mengakses ${url}:`, error.message);
-        return null;
-    }
-};
 
 const getFullApiUrl = (req) => `${req.protocol}://${req.get('host')}/api`;
 
-const parseComicCard = ($, el, apiUrl) => {
-    const judul = $(el).find('h3 a, .bge a h3').text().trim();
+// Fungsi parsing yang disesuaikan untuk halaman /daftar-komik/
+const parseDaftarKomikCard = ($, el, apiUrl) => {
+    const judul = $(el).find('div.bge h3').text().trim();
     const url = $(el).find('a').attr('href');
     let gambar_sampul = $(el).find('img').attr('data-src') || $(el).find('img').attr('src');
-    const chapter = $(el).find('.ls24, .ls2l, .chp').first().text().trim();
-    const tipe = $(el).find('span[class^="man"]').text().trim();
+    const chapter = $(el).find('div.bge .chp').first().text().trim();
 
     if (gambar_sampul) {
         gambar_sampul = `${apiUrl}/image?url=${encodeURIComponent(gambar_sampul.trim().split('?')[0])}`;
     }
 
     if (judul && url) {
-        return { judul, chapter, gambar_sampul, tipe, url };
+        return { judul, chapter, gambar_sampul, url };
     }
     return null;
 };
@@ -67,64 +48,65 @@ app.get('/api/image', async (req, res) => {
     }
 });
 
-// [PERBAIKAN FINAL] Endpoint ini sekarang benar-benar mendukung paginasi
+// [PERBAIKAN FINAL] Endpoint ini sekarang menggunakan scroll dinamis sampai akhir
 app.get('/api/daftar-komik', async (req, res) => {
-    const page = req.query.page || 1;
-    const params = new URLSearchParams({
-        post_type: 'manga',
-        orderby: 'title',
-        order: 'ASC',
-        page: page
-    });
-    const url = `${API_URL}/?${params.toString()}`;
-    const headers = { 'Cookie': KOMIKU_COOKIE };
+    let browser = null;
+    try {
+        // Konfigurasi Puppeteer untuk Vercel
+        browser = await puppeteer.launch({
+            args: chrome.args,
+            executablePath: await chrome.executablePath,
+            headless: chrome.headless,
+        });
 
-    const $ = await dapatkanHtml(url, headers);
-    if (!$) {
-        return res.status(500).json({ success: false, message: 'Gagal mengambil data dari API Komiku.' });
+        const page = await browser.newPage();
+        await page.goto(`${WEB_URL}/daftar-komik/`, { waitUntil: 'networkidle2' });
+
+        // --- PERBAIKAN UTAMA: Logika scroll dinamis ---
+        let previousHeight = 0;
+        let currentHeight = await page.evaluate('document.body.scrollHeight');
+        // Loop akan terus berjalan selama halaman masih bertambah tinggi (ada konten baru)
+        while (previousHeight < currentHeight) {
+            previousHeight = currentHeight;
+            await page.evaluate('window.scrollTo(0, document.body.scrollHeight)');
+            // Tunggu sebentar untuk memastikan konten baru (jika ada) sudah dimuat
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Tunggu 2 detik
+            currentHeight = await page.evaluate('document.body.scrollHeight');
+        }
+        // --- Akhir Perbaikan ---
+
+        const content = await page.content();
+        const $ = cheerio.load(content);
+        
+        const comics = [];
+        const apiUrl = getFullApiUrl(req);
+        
+        $('div.bge').each((i, el) => {
+            const comic = parseDaftarKomikCard($, el, apiUrl);
+            if (comic) comics.push(comic);
+        });
+
+        if (comics.length === 0) {
+            return res.status(404).json({ success: false, message: 'Tidak ada komik yang ditemukan.' });
+        }
+
+        // Karena ini mengambil semua, kita tidak perlu paginasi lagi
+        res.json({
+            success: true,
+            data: comics
+        });
+
+    } catch (error) {
+        console.error("Error di endpoint /daftar-komik dengan Puppeteer:", error);
+        res.status(500).json({ success: false, message: 'Gagal mengambil data dari Komiku.' });
+    } finally {
+        if (browser !== null) {
+            await browser.close();
+        }
     }
-
-    const comics = [];
-    const apiUrl = getFullApiUrl(req);
-    $('div.bge').each((i, el) => {
-        const comic = parseComicCard($, el, apiUrl);
-        if (comic) comics.push(comic);
-    });
-
-    res.json({
-        success: true,
-        data: comics
-    });
 });
 
-// Endpoint lainnya (search, detail, dll) tetap sama
-app.get('/api/search/:query', async (req, res) => {
-    const { query } = req.params;
-    const page = req.query.page || 1; // Menambahkan dukungan paginasi untuk pencarian
-    const url = `${API_URL}/?post_type=manga&s=${encodeURIComponent(query)}&page=${page}`;
-    const $ = await dapatkanHtml(url, { 'Cookie': KOMIKU_COOKIE });
-    if (!$) return res.status(500).json({ success: false, message: `Gagal mencari "${query}".` });
-    const comics = [];
-    const apiUrl = getFullApiUrl(req);
-    $('div.bge').each((i, el) => {
-        const comic = parseComicCard($, el, apiUrl);
-        if (comic) comics.push(comic);
-    });
-    res.json({ success: true, data: comics });
-});
-
-app.get('/api/terbaru', async (req, res) => {
-    const $ = await dapatkanHtml(WEB_URL, { 'Cookie': KOMIKU_COOKIE });
-    if (!$) return res.status(500).json({ success: false, message: 'Gagal mengambil data terbaru.' });
-    const comics = [];
-    const apiUrl = getFullApiUrl(req);
-    $('#Terbaru article.ls4').each((i, el) => {
-        const comic = parseComicCard($, el, apiUrl);
-        if (comic) comics.push(comic);
-    });
-    res.json({ success: true, data: comics });
-});
-
+// Endpoint lainnya bisa tetap menggunakan axios jika tidak memerlukan eksekusi JS
+// ...
 
 module.exports = app;
-        
