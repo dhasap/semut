@@ -190,27 +190,35 @@ app.get('/api/daftar-komik', async (req, res) => {
 // [ENDPOINT BARU] Untuk mengambil komik berdasarkan genre dengan pagination
 app.get('/api/genre/:genreId', async (req, res) => {
     const { genreId } = req.params;
-    const page = req.query.page || 1;
-    const targetUrl = `${WEB_URL}/genre/${genreId}/page/${page}/`;
+    
+    // URL API internal Komiku yang sebenarnya, tanpa pagination
+    const targetUrl = `https://api.komiku.org/manga/?orderby=modified&genre=${genreId}`;
 
     try {
-        const $ = await dapatkanHtml(targetUrl, { 'Cookie': KOMIKU_COOKIE });
-        if (!$) {
+        // API internal ini mengembalikan potongan HTML, jadi kita langsung gunakan axios
+        const { data: htmlSnippet } = await axios.get(targetUrl, {
+            headers: { 'Referer': `${WEB_URL}/` }
+        });
+
+        if (!htmlSnippet) {
             return res.status(500).json({ success: false, message: `Gagal mengambil data untuk genre "${genreId}".` });
         }
 
+        const $ = cheerio.load(htmlSnippet);
         const comics = [];
         const apiUrl = getFullApiUrl(req);
-        // Halaman genre menggunakan selector yang sama dengan halaman pencarian
+
+        // Selector '.bge' digunakan karena ini yang dikembalikan oleh API internal
         $('div.bge').each((i, el) => {
             const comic = parseComicCard($, el, apiUrl);
             if (comic) comics.push(comic);
         });
 
         if (comics.length === 0) {
-             return res.status(404).json({ success: false, message: 'Tidak ada komik ditemukan di halaman ini.' });
+             return res.status(404).json({ success: false, message: 'Tidak ada komik ditemukan untuk genre ini.' });
         }
 
+        // Hapus hasNextPage karena tidak ada pagination
         res.json({ success: true, data: comics });
     } catch (error) {
         console.error(`Error di endpoint /api/genre/${genreId}:`, error);
