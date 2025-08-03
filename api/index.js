@@ -224,12 +224,12 @@ app.get('/api/search/:query', async (req, res) => {
     const { query } = req.params;
     const page = req.query.page || 1;
     const searchUrl = `${WEB_URL}/page/${page}/?s=${encodeURIComponent(query)}&post_type=manga`;
-    const $ = await dapatkanHtml(searchUrl, { 'Cookie': KOMIKU_COOKIE });
+    const $ = await dapatkanHtml(url);
     if (!$) return res.status(500).json({ success: false, message: `Gagal mencari "${query}".` });
     
     const comics = [];
     const apiUrl = getFullApiUrl(req);
-    $('div.bge_p').each((i, el) => {
+    $('div.bge').each((i, el) => {
         const comic = parseComicCard($, el, apiUrl);
         if (comic) comics.push(comic);
     });
