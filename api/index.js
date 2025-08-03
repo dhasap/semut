@@ -7,7 +7,7 @@ const app = express();
 app.use(cors());
 
 const WEB_URL = 'https://komiku.org';
-const KOMIKU_COOKIE = '__ddg1_=Zr0wlaxT0pDXTxpHjAfS; _ga=GA1.1.1645755130.1754118007; _ga_ZEY1BX76ZS=GS2.1.s1754118006$o1$g1$t1754120412$j18$l0$h0; __ddg8_=laUdHXcXNwS7JSlg; __ddg10_=1754124007; __ddg9_=103.47.132.62';
+const KOMIKU_COOKIE = '__ddg1_=Zr0wlaxT0pDXTxpHjAfS; _ga=GA1.1.1645755130.1754118007; _ga_Zey1BX76ZS=GS2.1.s1754118006$o1$g1$t1754120412$j18$l0$h0; __ddg8_=laUdHXcXNwS7JSlg; __ddg10_=1754124007; __ddg9_=103.47.132.62';
 
 const dapatkanHtml = async (url, customHeaders = {}) => {
     try {
@@ -36,8 +36,10 @@ const parseComicCard = ($, el, apiUrl) => {
     const chapter = $(el).find('.ls24, .ls2l, .chp').first().text().trim();
     const tipe = $(el).find('span[class^="man"]').text().trim();
 
-    if (gambar_sampul) {
+    if (gambar_sampul && !gambar_sampul.startsWith('http')) {
         gambar_sampul = `${apiUrl}/image?url=${encodeURIComponent(gambar_sampul.trim().split('?')[0])}`;
+    } else if (gambar_sampul) {
+         gambar_sampul = `${apiUrl}/image?url=${encodeURIComponent(gambar_sampul.trim().split('?')[0])}`;
     }
 
     if (judul && url) {
@@ -63,33 +65,27 @@ app.get('/api/image', async (req, res) => {
     }
 });
 
-// [BARU] Endpoint untuk mengambil daftar genre dari Komiku
+// [PERBAIKAN] Endpoint untuk mengambil genre dan tipe dari halaman utama Komiku
 app.get('/api/komiku/genres', async (req, res) => {
     try {
-        const targetUrl = `${WEB_URL}/daftar-komik/`;
-        const $ = await dapatkanHtml(targetUrl);
+        const $ = await dapatkanHtml(WEB_URL); // Ambil dari halaman utama
         if (!$) {
-            return res.status(500).json({ success: false, message: 'Gagal mengambil data genre dari Komiku.' });
+            return res.status(500).json({ success: false, message: 'Gagal mengambil data filter dari Komiku.' });
         }
         
         const genres = [];
-        // Selector menargetkan menu filter di halaman daftar komik
-        $('#Menu_Tambahan a').each((i, el) => {
+        // Selector menargetkan widget genre di sidebar halaman utama
+        $('h2:contains("Genre")').next('ul.genre').find('li a').each((i, el) => {
             const name = $(el).text().trim();
             const href = $(el).attr('href');
-            // Ekstrak parameter dari href, contoh: ?tipe=manhwa -> manhwa
-            const param = new URLSearchParams(href).toString().split('=')[1];
-            
-            // Hanya ambil genre, bukan tipe
-            if (href.includes('/genre/')) {
-                 genres.push({
+            if(name && href) {
+                genres.push({
                     id: href.split('/genre/')[1].replace('/', ''),
                     name: name
                 });
             }
         });
         
-        // Menambahkan tipe komik secara manual karena strukturnya berbeda
         const types = [
             { id: 'manga', name: 'Manga' },
             { id: 'manhwa', name: 'Manhwa' },
@@ -105,19 +101,18 @@ app.get('/api/komiku/genres', async (req, res) => {
 });
 
 
-// [DIPERBARUI] Endpoint /daftar-komik Komiku dengan filter 'tipe' dan 'genre'
+// [PERBAIKAN] Endpoint /daftar-komik Komiku disatukan logikanya
 app.get('/api/daftar-komik', async (req, res) => {
     try {
         const { tipe, genre, page = 1 } = req.query;
         let targetUrl;
 
         if (genre) {
-            // Jika ada genre, URL-nya berbeda
             targetUrl = `${WEB_URL}/genre/${genre}/page/${page}/`;
         } else {
-            // URL default atau dengan filter tipe
+            // URL dasar sekarang adalah /pustaka/ yang lebih konsisten
             targetUrl = `${WEB_URL}/pustaka/page/${page}/`;
-            if (tipe && ['manga', 'manhwa', 'manhua'].includes(tipe)) {
+            if (tipe) {
                 targetUrl += `?tipe=${tipe}`;
             }
         }
@@ -128,14 +123,15 @@ app.get('/api/daftar-komik', async (req, res) => {
         const comics = [];
         const apiUrl = getFullApiUrl(req);
         
-        // Selector ini menargetkan daftar komik di halaman Pustaka/Genre
+        // Halaman Pustaka, Genre, dan Search semua menggunakan selector 'div.bge'
         $('div.bge').each((i, el) => {
             const comic = parseComicCard($, el, apiUrl);
             if (comic) comics.push(comic);
         });
 
         if (comics.length === 0) {
-            return res.status(404).json({ success: false, message: 'Tidak ada komik yang ditemukan atau halaman terakhir.' });
+            // Memberi pesan 404 jika tidak ada komik, ini akan menghentikan "load more" di frontend
+            return res.status(404).json({ success: false, message: 'Tidak ada komik lagi yang ditemukan.' });
         }
 
         res.json({ success: true, data: comics });
@@ -220,8 +216,8 @@ app.get('/api/chapter', async (req, res) => {
         if (src) return `${apiUrl}/image?url=${encodeURIComponent(src.trim())}`;
         return null;
     }).get().filter(Boolean);
-    res.json({ success: true, data: images });
+    res.json({ success: true, data: {title: $('h1#Judul').text(), images} });
 });
 
 module.exports = app;
-                                         
+    
