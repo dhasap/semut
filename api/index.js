@@ -222,21 +222,34 @@ app.get('/api/genre/:genreId', async (req, res) => {
 // Endpoint Pencarian
 app.get('/api/search/:query', async (req, res) => {
     const { query } = req.params;
-    const page = req.query.page || 1;
-    const searchUrl = `${WEB_URL}/page/${page}/?s=${encodeURIComponent(query)}&post_type=manga`;
+    // Pagination tidak didukung oleh API internal ini, jadi kita abaikan
+    // const page = req.query.page || 1; 
     
-    const $ = await dapatkanHtml(searchUrl, { 'Cookie': KOMIKU_COOKIE });
-    if (!$) return res.status(500).json({ success: false, message: `Gagal mencari "${query}".` });
+    // URL baru yang ditargetkan
+    const searchUrl = `https://api.komiku.org/?post_type=manga&s=${encodeURIComponent(query)}`;
     
-    const comics = [];
-    const apiUrl = getFullApiUrl(req);
-    $('div.bge_p').each((i, el) => {
-        const comic = parseComicCard($, el, apiUrl);
-        if (comic) comics.push(comic);
-    });
-    
-    res.json({ success: true, data: comics });
+    try {
+        // Mengambil data langsung dari API internal Komiku
+        const { data } = await axios.get(searchUrl);
+        const $ = cheerio.load(data); // Memuat respons (yang berupa HTML snippet) ke Cheerio
+        
+        const comics = [];
+        const apiUrl = getFullApiUrl(req);
+
+        // Selector tetap .bge_p karena API internal mengembalikan struktur itu
+        $('div.bge_p').each((i, el) => {
+            const comic = parseComicCard($, el, apiUrl);
+            if (comic) comics.push(comic);
+        });
+        
+        res.json({ success: true, data: comics });
+
+    } catch (error) {
+        console.error(`Error di endpoint /api/search/${query}:`, error);
+        res.status(500).json({ success: false, message: 'Terjadi kesalahan saat mencari.' });
+    }
 });
+
 
 // Endpoint Terbaru
 app.get('/api/terbaru', async (req, res) => {
