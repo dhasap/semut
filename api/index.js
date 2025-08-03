@@ -13,7 +13,7 @@ const myCache = new NodeCache({ stdTTL: 7200, checkperiod: 120 });
 const WEB_URL = 'https://komiku.org';
 
 // Cookie ini mungkin perlu diperbarui jika API berhenti bekerja
-const KOMIKU_COOKIE = '__ddg1_=Zr0wlaxT0pDXTxpHjAfS; _ga=GA1.1.1645755130.1754118007; _ga_ZEY1BX76ZS=GS2.1.s1754118006$o1$g1$t1754120412$j18$l0$h0; __ddg8_=laUdHXcXNwS7JSlg; __ddg10_=1754120407; __ddg9_=103.47.132.62';
+const KOMIKU_COOKIE = '__ddg1_=Zr0wlaxT0pDXTxpHjAfS; _ga=GA1.1.1645755130.1754118007; _ga_ZEY1BX76ZS=GS2.1.s1754206495$o4$g1$t1754206533$j22$l0$h0';
 
 /**
  * Fungsi untuk mengambil data HTML dari URL target.
