@@ -229,7 +229,7 @@ app.get('/api/search/:query', async (req, res) => {
     
     const comics = [];
     const apiUrl = getFullApiUrl(req);
-    $('div.bge').each((i, el) => {
+    $('div.bge_p').each((i, el) => {
         const comic = parseComicCard($, el, apiUrl);
         if (comic) comics.push(comic);
     });
