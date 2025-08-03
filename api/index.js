@@ -187,45 +187,59 @@ app.get('/api/daftar-komik', async (req, res) => {
     }
 });
 
-// [ENDPOINT BARU] Untuk mengambil komik berdasarkan genre dengan pagination
+// [ENDPOINT BARU] Untuk mengambil komik berdasarkan genre
 app.get('/api/genre/:genreId', async (req, res) => {
     const { genreId } = req.params;
     
-    // URL API internal Komiku yang sebenarnya, tanpa pagination
-    const targetUrl = `https://api.komiku.org/manga/?orderby=modified&genre=${genreId}`;
+    let currentPageUrl = `https://api.komiku.org/manga/?orderby=modified&genre=${genreId}`;
+    const allComics = [];
+    const apiUrl = getFullApiUrl(req);
 
     try {
-        // API internal ini mengembalikan potongan HTML, jadi kita langsung gunakan axios
-        const { data: htmlSnippet } = await axios.get(targetUrl, {
-            headers: { 'Referer': `${WEB_URL}/` }
-        });
+        // Terus lakukan loop selama ada URL halaman berikutnya untuk di-fetch
+        while (currentPageUrl) {
+            const { data: htmlSnippet } = await axios.get(currentPageUrl, {
+                headers: { 'Referer': `${WEB_URL}/` }
+            });
 
-        if (!htmlSnippet) {
-            return res.status(500).json({ success: false, message: `Gagal mengambil data untuk genre "${genreId}".` });
+            // Berhenti jika respons kosong
+            if (!htmlSnippet) {
+                break; 
+            }
+
+            const $ = cheerio.load(htmlSnippet);
+
+            // Ambil data komik dari potongan HTML saat ini
+            $('div.bge').each((i, el) => {
+                const comic = parseComicCard($, el, apiUrl);
+                if (comic) allComics.push(comic);
+            });
+
+            // Cari URL halaman berikutnya dari tag span htmx
+            const nextTrigger = $('span[hx-get]');
+            if (nextTrigger.length > 0) {
+                currentPageUrl = nextTrigger.attr('hx-get');
+            } else {
+                // Jika tidak ada lagi, hentikan loop
+                currentPageUrl = null; 
+            }
         }
 
-        const $ = cheerio.load(htmlSnippet);
-        const comics = [];
-        const apiUrl = getFullApiUrl(req);
-
-        // Selector '.bge' digunakan karena ini yang dikembalikan oleh API internal
-        $('div.bge').each((i, el) => {
-            const comic = parseComicCard($, el, apiUrl);
-            if (comic) comics.push(comic);
-        });
-
-        if (comics.length === 0) {
+        if (allComics.length === 0) {
              return res.status(404).json({ success: false, message: 'Tidak ada komik ditemukan untuk genre ini.' });
         }
 
-        // Hapus hasNextPage karena tidak ada pagination
-        res.json({ success: true, data: comics });
+        res.json({ success: true, data: allComics });
+
     } catch (error) {
-        console.error(`Error di endpoint /api/genre/${genreId}:`, error);
+        // Jika terjadi error tapi kita sudah punya beberapa data komik, kirim saja data yang ada
+        if (allComics.length > 0) {
+            return res.json({ success: true, data: allComics });
+        }
+        console.error(`Error di endpoint /api/genre/${genreId}:`, error.message);
         res.status(500).json({ success: false, message: 'Terjadi kesalahan server.' });
     }
 });
-
 
 // Endpoint Pencarian
 app.get('/api/search/:query', async (req, res) => {
