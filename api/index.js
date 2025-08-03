@@ -222,7 +222,6 @@ app.get('/api/genre/:genreId', async (req, res) => {
 // Endpoint Pencarian
 app.get('/api/search/:query', async (req, res) => {
     const { query } = req.params;
-    const page = req.query.page || 1;
     const searchUrl = `${WEB_URL}/page/${page}/?s=${encodeURIComponent(query)}&post_type=manga`;
     const $ = await dapatkanHtml(url);
     if (!$) return res.status(500).json({ success: false, message: `Gagal mencari "${query}".` });
