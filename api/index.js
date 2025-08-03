@@ -237,7 +237,7 @@ app.get('/api/search/:query', async (req, res) => {
         const apiUrl = getFullApiUrl(req);
 
         // Selector tetap .bge_p karena API internal mengembalikan struktur itu
-        $('div.bge_p').each((i, el) => {
+        $('div.bge').each((i, el) => {
             const comic = parseComicCard($, el, apiUrl);
             if (comic) comics.push(comic);
         });
