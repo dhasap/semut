@@ -85,13 +85,44 @@ app.get('/api/image', async (req, res) => {
     }
 });
 
+// [BARU] Endpoint untuk mengambil filter Genre dan Tipe
+app.get('/api/filters', async (req, res) => {
+    try {
+        const $ = await dapatkanHtml(WEB_URL);
+        if (!$) return res.status(500).json({ success: false, message: 'Gagal mengambil data filter.' });
+        
+        const genres = [];
+        $('h2:contains("Genre")').next('ul.genre').find('li a').each((i, el) => {
+            const name = $(el).text().trim();
+            const href = $(el).attr('href');
+            if(name && href && href.includes('/genre/')) {
+                genres.push({
+                    id: href.split('/genre/')[1].replace('/', ''),
+                    name: name
+                });
+            }
+        });
+        
+        const types = [
+            { id: 'manga', name: 'Manga' },
+            { id: 'manhwa', name: 'Manhwa' },
+            { id: 'manhua', name: 'Manhua' }
+        ];
+
+        res.json({ success: true, data: { types, genres } });
+    } catch (error) {
+        console.error("Error di endpoint /api/filters:", error);
+        res.status(500).json({ success: false, message: 'Terjadi kesalahan server.' });
+    }
+});
+
+
 // [VERSI STABIL] Endpoint /daftar-komik dengan filter 'tipe'
 app.get('/api/daftar-komik', async (req, res) => {
     try {
         const { tipe } = req.query; // Ambil query parameter 'tipe'
         let targetUrl = `${WEB_URL}/daftar-komik/`;
 
-        // Jika ada parameter 'tipe', tambahkan ke URL
         if (tipe && ['manga', 'manhwa', 'manhua'].includes(tipe)) {
             targetUrl += `?tipe=${tipe}`;
         }
@@ -105,7 +136,6 @@ app.get('/api/daftar-komik', async (req, res) => {
         const comics = [];
         const apiUrl = getFullApiUrl(req);
         
-        // Selector ini berfungsi untuk halaman daftar komik (dengan atau tanpa filter)
         $('div#history div.ls4').each((i, el) => {
             const anchor = $(el).find('div.ls4j > h4 > a');
             const judul = anchor.text().trim();
@@ -122,13 +152,12 @@ app.get('/api/daftar-komik', async (req, res) => {
                  gambar_sampul = 'https://placehold.co/400x600/1e293b/ffffff?text=' + encodeURIComponent(judul.charAt(0));
             }
 
-
             if (judul && url) {
                 comics.push({
                     judul,
                     url,
                     gambar_sampul,
-                    chapter: '' // Informasi chapter tidak tersedia di halaman ini
+                    chapter: ''
                 });
             }
         });
@@ -148,8 +177,7 @@ app.get('/api/daftar-komik', async (req, res) => {
     }
 });
 
-
-// Endpoint Pencarian
+// [DITAMBAHKAN KEMBALI] Endpoint Pencarian
 app.get('/api/search/:query', async (req, res) => {
     const { query } = req.params;
     const page = req.query.page || 1;
@@ -166,6 +194,7 @@ app.get('/api/search/:query', async (req, res) => {
     
     res.json({ success: true, data: comics });
 });
+
 
 // Endpoint Terbaru
 app.get('/api/terbaru', async (req, res) => {
@@ -227,7 +256,7 @@ app.get('/api/chapter', async (req, res) => {
         if (src) return `${apiUrl}/image?url=${encodeURIComponent(src.trim())}`;
         return null;
     }).get().filter(Boolean);
-    res.json({ success: true, data: images });
+    res.json({ success: true, data: {title: $('h1#Judul').text(), images} });
 });
 
 module.exports = app;
