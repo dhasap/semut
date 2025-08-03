@@ -2,9 +2,16 @@ const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const cors = require('cors');
+// [CACHE] 1. Impor pustaka node-cache
+const NodeCache = require('node-cache');
 
 const app = express();
 app.use(cors());
+
+// [CACHE] 2. Inisialisasi cache dengan waktu hidup (TTL) 2 jam (7200 detik)
+// Data akan otomatis dihapus dari cache setelah 2 jam.
+const myCache = new NodeCache({ stdTTL: 7200, checkperiod: 120 });
+
 
 // URL target
 const WEB_URL = 'https://komiku.org';
@@ -117,18 +124,29 @@ app.get('/api/filters', async (req, res) => {
 });
 
 
-// [VERSI STABIL] Endpoint /daftar-komik dengan filter 'tipe'
+// [VERSI STABIL DENGAN CACHE] Endpoint /daftar-komik
 app.get('/api/daftar-komik', async (req, res) => {
     try {
-        const { tipe } = req.query; // Ambil query parameter 'tipe'
-        let targetUrl = `${WEB_URL}/daftar-komik/`;
+        const { tipe } = req.query;
+        // [CACHE] 3. Buat kunci unik untuk cache berdasarkan parameter.
+        const cacheKey = `daftar-komik-${tipe || 'all'}`;
 
+        // [CACHE] 4. Cek apakah data ada di cache.
+        const cachedData = myCache.get(cacheKey);
+        if (cachedData) {
+            console.log(`[CACHE HIT] Mengambil data dari cache untuk: ${cacheKey}`);
+            return res.json(cachedData); // Jika ada, langsung kirim.
+        }
+
+        // [CACHE] 5. Jika tidak ada di cache (cache miss), lanjutkan proses.
+        console.log(`[CACHE MISS] Mengambil data baru untuk: ${cacheKey}`);
+        
+        let targetUrl = `${WEB_URL}/daftar-komik/`;
         if (tipe && ['manga', 'manhwa', 'manhua'].includes(tipe)) {
             targetUrl += `?tipe=${tipe}`;
         }
 
         const $ = await dapatkanHtml(targetUrl);
-
         if (!$) {
             return res.status(500).json({ success: false, message: 'Gagal mengambil data dari Komiku.' });
         }
@@ -166,10 +184,16 @@ app.get('/api/daftar-komik', async (req, res) => {
             return res.status(404).json({ success: false, message: 'Tidak ada komik yang ditemukan.' });
         }
 
-        res.json({
+        const responseData = {
             success: true,
             data: comics
-        });
+        };
+
+        // [CACHE] 6. Simpan hasil baru ke cache sebelum dikirim.
+        myCache.set(cacheKey, responseData);
+        console.log(`[CACHE SET] Data baru untuk ${cacheKey} telah disimpan.`);
+
+        res.json(responseData);
 
     } catch (error) {
         console.error("Error di endpoint /daftar-komik:", error);
